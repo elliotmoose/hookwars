@@ -9,49 +9,44 @@ public class Bezier : MonoBehaviour
     public GameObject sampleObjectPrefab;
     public GameObject controlPointPrefab;
 
-    float sampleResolution = 30;
-    float discreteSampleDistance = 0.5f;
+    public float discreteSampleDistance = 0.5f;
 
-    // Start is called before the first frame update
-    void Start()
-    {
-        controlPoints.Add(this.transform); //add head
-        SpawnControlPoint();
+    public bool outgoing = true;
+    public float speed = 2.5f;
+    float maxDistance = 10;
+    float curDistance = 0;
 
-        for(int i=0; i<sampleResolution+1; i++) {
-            GameObject go = GameObject.Instantiate(sampleObjectPrefab, Vector3.zero, Quaternion.identity);
-            samples.Add(go);
-        }
-        
-        this.GetComponent<Rigidbody>().AddForce(new Vector3(speed, 0, -speed), ForceMode.Impulse);
+    Vector3 moveDir = Vector3.forward;
+    public void Cast(Player caster, Vector3 target) {
         lastPos = this.transform.position;
+        controlPoints.Add(this.transform); //add head
+        GameObject tail = SpawnControlPoint(); 
+        tail.transform.SetParent(caster.transform);
+        
+        Vector3 dir = (target-caster.transform.position).normalized * speed;
+        this.GetComponent<Rigidbody>().AddForce(dir, ForceMode.Impulse);
     }
 
-    void SpawnControlPoint() {
+    GameObject SpawnControlPoint() {
         // if(controlPoints.Count > 1) return;
         GameObject go = GameObject.Instantiate(controlPointPrefab, this.transform.position, Quaternion.identity);
         controlPoints.Insert(1, go.transform);
+        return go;
     }
 
+    GameObject GetOrCreateSampledPoint(int i) {
+        if(i < samples.Count) {            
+            return samples[i];
+        }
+        else {
+            GameObject go = GameObject.Instantiate(sampleObjectPrefab, Vector3.zero, Quaternion.identity);
+            samples.Add(go);
+            return go;
+        }
+    }
     // Update is called once per frame
     void Update()
     {
-        if(controlPoints.Count > 1) {
-            float[] bezierSegments = CalculateBezierSegments(100);
-            for (int i = 0; i < sampleResolution+1; i++)
-            {
-                float targetDistance = i * discreteSampleDistance;
-                bool isOutsideBezier = (targetDistance > bezierSegments[bezierSegments.Length-1]);
-
-                if(!isOutsideBezier) {
-                    samples[i].SetActive(true);
-                    samples[i].transform.position = SampleDiscrete(i, bezierSegments);
-                }
-                else {
-                    samples[i].SetActive(false);
-                }
-            }
-        }
         
 
         //head
@@ -60,10 +55,17 @@ public class Bezier : MonoBehaviour
 
         if(outgoing && curDistance > maxDistance) {
             outgoing = false;
+            this.GetComponent<SphereCollider>().enabled = false;
         }
 
         if(!outgoing) {
             if(controlPoints.Count <= 1) {
+                // //cleanup extra samples
+                for(int x=samples.Count-1; x>=0; x--) {                
+                    GameObject sample = samples[x];
+                    samples.Remove(sample);
+                    GameObject.Destroy(sample);
+                }
                 GameObject.Destroy(this.gameObject);
             }
             else {
@@ -71,7 +73,7 @@ public class Bezier : MonoBehaviour
                 Vector3 toPrevControlPoint = (prevControlPoint.position - this.transform.position);
                 this.GetComponent<Rigidbody>().velocity = toPrevControlPoint.normalized * speed;
 
-                if(toPrevControlPoint.magnitude <= 0.05f) 
+                if(toPrevControlPoint.magnitude <= 0.1f) 
                 {
                     GameObject.Destroy(prevControlPoint.gameObject);
                     controlPoints.RemoveAt(1);
@@ -79,14 +81,30 @@ public class Bezier : MonoBehaviour
 
             }
         }
+
+        if(controlPoints.Count > 1) {
+            float[] bezierSegments = CalculateBezierSegments(100);
+            int i = 0;
+            float targetDistance = i * discreteSampleDistance;
+            bool isOutsideBezier = (targetDistance > bezierSegments[bezierSegments.Length-1]);
+
+            while(!isOutsideBezier) {                                
+                GetOrCreateSampledPoint(i).transform.position = SampleDiscrete(i, bezierSegments);
+                
+                i++;
+                targetDistance = i * discreteSampleDistance;
+                isOutsideBezier = (targetDistance > bezierSegments[bezierSegments.Length-1]);
+            }
+
+            // //cleanup extra samples
+            for(int x=samples.Count-1; x>=i; x--) {                
+                GameObject sample = samples[x];
+                samples.Remove(sample);
+                GameObject.Destroy(sample);
+            }
+        }
     }
 
-    public bool outgoing = true;
-    float speed = 2.5f;
-    float maxDistance = 10;
-    float curDistance = 0;
-
-    Vector3 moveDir = Vector3.forward;
 
     // Update is called once per frame
     Vector3 lastPos;
@@ -98,6 +116,7 @@ public class Bezier : MonoBehaviour
 
     public void OnCollisionEnter(Collision collision) {
         if(outgoing) {
+            if(collision.gameObject.GetComponent<Player>()) return;
             SpawnControlPoint();
         }
     }
@@ -144,7 +163,6 @@ public class Bezier : MonoBehaviour
     }
 
     Vector3 Sample(float t) {
-        Debug.Log(controlPoints.Count);
         //sample bezier curve
         Vector3[] coeffs = new Vector3[controlPoints.Count];
 
